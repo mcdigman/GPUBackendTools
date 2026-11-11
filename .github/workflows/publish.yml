@@ -1,8 +1,15 @@
 name: Build and publish wheels
 on:
+  release:
+    types: [published]
   push:
+    branches: ['**']
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'release' }}
 jobs:
   select:
     runs-on: ubuntu-latest
@@ -13,32 +20,42 @@ jobs:
     steps:
       - name: initialize
         run: |
-          echo "GBTWHL_BUILD=false" >> "$GITHUB_ENV"
-          echo "GBTWHL_CORE_SUFFIX=false" >> "$GITHUB_ENV"
-          echo "GBTWHL_PUBLISH=false" >> "$GITHUB_ENV"
+          {
+            echo "GBTWHL_BUILD=false"
+            echo "GBTWHL_CORE_SUFFIX=false"
+            echo "GBTWHL_PUBLISH=false"
+          } >> "$GITHUB_ENV"
       - name: build on commit message
-        if: contains(github.event.head_commit.message, '[ci:build-wheels]')
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[ci:build-wheels]')
         run: |
           echo "GBTWHL_BUILD=true" >> "$GITHUB_ENV"
       - name: publish wheels on commit message
-        if: contains(github.event.head_commit.message, '[ci:publish-wheels]')
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[ci:publish-wheels]')
         run: |
           echo "GBTWHL_PUBLISH=true" >> "$GITHUB_ENV"
-      - name: build and publish on tag 'v*'
-        if: startsWith(github.event.ref, 'refs/tags/v')
+      - name: build wheels on manual dispatch
+        if: github.event_name == 'workflow_dispatch'
         run: |
           echo "GBTWHL_BUILD=true" >> "$GITHUB_ENV"
-          echo "GBTWHL_PUBLISH=true" >> "$GITHUB_ENV"
+      - name: build and publish on tag 'v*'
+        if: github.event_name == 'release' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          {
+            echo "GBTWHL_BUILD=true"
+            echo "GBTWHL_PUBLISH=true"
+          } >> "$GITHUB_ENV"
       - name: add core-suffix on non-official repo
-        if: github.event.repository.full_name != 'mikekatz04/LISAanalysistools'
+        if: github.repository_id != '1050703408' # lisa-analysis-tools/GPUBackendTools
         run: |
           echo "GBTWHL_CORE_SUFFIX=true" >> "$GITHUB_ENV"
       - name: output results
         id: select
         run: |
-          echo "build=$GBTWHL_BUILD" >> $GITHUB_OUTPUT
-          echo "publish=$GBTWHL_PUBLISH" >> $GITHUB_OUTPUT
-          echo "core-suffix=$GBTWHL_CORE_SUFFIX" >> $GITHUB_OUTPUT
+          {
+            echo "build=$GBTWHL_BUILD"
+            echo "publish=$GBTWHL_PUBLISH"
+            echo "core-suffix=$GBTWHL_CORE_SUFFIX"
+          } >> "$GITHUB_OUTPUT"
   version:
     runs-on: ubuntu-latest
     outputs:
@@ -47,18 +64,19 @@ jobs:
       # =========================
       # = I - Retrieve sources  =
       # =========================
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       # ===================================
       # = II - Prepare Python environment =
       # ===================================
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: |
-          pip install setuptools_scm
+          pip install setuptools_scm==10.3.4
       # ========================
       # = III - Detect version =
       # ========================
@@ -71,18 +89,24 @@ jobs:
         run: |
           VERSION="$(python -m setuptools_scm)"
           echo "RUNNING CHECK $(python -m setuptools_scm)"
-          echo "notice:: Detected version: ${VERSION}"
-          echo "value=${VERSION}" >> $GITHUB_OUTPUT
-          echo "version: ${VERSION}" >> $GITHUB_STEP_SUMMARY
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$ ]]; then
+            echo "::error::Unexpected version string."
+            exit 1
+          fi
+          echo "::notice:: Detected version: ${VERSION}"
+          echo "value=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version: ${VERSION}" >> "$GITHUB_STEP_SUMMARY"
   build:
     needs:
       - select
       - version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
@@ -97,10 +121,11 @@ jobs:
       # =====================
       # = V. Upload wheels  =
       # =====================
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wheels-${{ strategy.job-index }}
           path: ./dist/*
+          if-no-files-found: error
   
   publish:
     runs-on: ubuntu-latest
@@ -111,13 +136,13 @@ jobs:
     needs:
       - build
       - select
-    if: needs.select.outputs.publish == 'true'
+    if: github.event_name == 'release' && needs.select.outputs.publish == 'true'
     permissions:
       # IMPORTANT: this permission is mandatory for trusted publishing
       id-token: write
     steps:
       - name: Retrieve release distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist/
           merge-multiple: true
