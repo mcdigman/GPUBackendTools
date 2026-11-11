@@ -41,7 +41,7 @@ repos:
       - id: ruff-format
         args: [--extension, 'pyi:python']
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.8.17
+    rev: 0.13.7
     hooks:
       - id: uv-lock
       - id: uv-export

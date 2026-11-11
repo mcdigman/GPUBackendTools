@@ -75,8 +75,12 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          activate-environment: true
       - run: |
-          pip install setuptools_scm==10.3.4
+          uv sync --locked --only-group scm
       # ========================
       # = III - Detect version =
       # ========================
@@ -110,11 +114,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install build dependencies
-        run: python -m pip install build
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
       - name: Build Sdist and Wheel
-        run: python -m build --sdist --wheel --outdir dist/ . 
+        run: uv build --sdist --wheel --out-dir dist/ .
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{needs.version.outputs.version}}
 
